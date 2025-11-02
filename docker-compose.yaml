@@ -1,0 +1,28 @@
+services:
+  
+  db:
+    image: postgres:16-alpine
+    container_name: 2026_db
+    restart: always
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin
+      - POSTGRES_DB=2026_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pgdata:/var/lib/postgresql/data
+
+  queue:
+    image: redis:7-alpine
+    container_name: 2026_queue
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
