@@ -30,6 +30,8 @@ services:
     command: python src/main.py
     depends_on:
       - queue
+    environment:
+      - PYTHONUNBUFFERED=1
     restart: always
 
   scraper:
@@ -37,6 +39,8 @@ services:
     build:
       context: ./services/scraper
     command: python src/main.py
+    environment:
+      - PYTHONUNBUFFERED=1
     depends_on:
       - queue
       - db
