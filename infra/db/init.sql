@@ -5,10 +5,10 @@
 -- =================================================================
 
 -- Táblák törlése, ha már léteznek
-DROP TABLE IF EXISTS DailyPortalAggregates CASCADE;
-DROP TABLE IF EXISTS DailyAggregates CASCADE;
-DROP TABLE IF EXISTS ProcessedArticles CASCADE;
-DROP TABLE IF EXISTS RawArticles CASCADE;
+DROP TABLE IF EXISTS Daily_Portal_Aggregates CASCADE;
+DROP TABLE IF EXISTS Daily_Aggregates CASCADE;
+DROP TABLE IF EXISTS Processed_Articles CASCADE;
+DROP TABLE IF EXISTS Raw_Articles CASCADE;
 DROP TABLE IF EXISTS Portals CASCADE;
 DROP TABLE IF EXISTS Polls CASCADE;
 
@@ -28,7 +28,7 @@ CREATE TABLE Portals (
 );
 
 -- =================================================================
--- 2. Tábla: RawArticles
+-- 2. Tábla: Raw_Articles
 -- A beérkező, feldolgozatlan cikkek "piszkos" logja
 -- =================================================================
 CREATE TABLE Raw_Articles (
@@ -51,16 +51,16 @@ CREATE TABLE Raw_Articles (
     UNIQUE(url) -- Egy cikket csak egyszer scrapelünk
 );
 
-CREATE INDEX idx_rawarticles_status ON RawArticles(status);
-CREATE INDEX idx_rawarticles_publish_date ON RawArticles(publish_date);
+CREATE INDEX idx_rawarticles_status ON Raw_Articles(status);
+CREATE INDEX idx_rawarticles_publish_date ON Raw_Articles(publish_date);
 
 -- =================================================================
--- 3. Tábla: ProcessedArticles
+-- 3. Tábla: Processed_Articles
 -- A "dúsított" adatok táblája (NLP kimenete)
 -- =================================================================
 CREATE TABLE Processed_Articles (
     processed_id BIGSERIAL PRIMARY KEY,
-    article_id BIGINT NOT NULL UNIQUE, -- 1:1 kapcsolat a RawArticles-szal
+    article_id BIGINT NOT NULL UNIQUE, -- 1:1 kapcsolat a Raw_Articles-szal
     
     -- NLP Eredmények
     mentions_ov BOOLEAN DEFAULT false NOT NULL,
@@ -80,12 +80,12 @@ CREATE TABLE Processed_Articles (
 
     CONSTRAINT fk_rawarticle
         FOREIGN KEY(article_id)
-        REFERENCES RawArticles(article_id)
+        REFERENCES Raw_Articles(article_id)
         ON DELETE CASCADE -- Ha törlődik a nyers cikk, törlődjön ez is
 );
 
-CREATE INDEX idx_processedarticles_narrative_hash ON ProcessedArticles(narrative_hash);
-CREATE INDEX idx_processedarticles_topic ON ProcessedArticles(topic);
+CREATE INDEX idx_processedarticles_narrative_hash ON Processed_Articles(narrative_hash);
+CREATE INDEX idx_processedarticles_topic ON Processed_Articles(topic);
 
 -- =================================================================
 -- 4. Tábla: Polls
@@ -103,7 +103,7 @@ CREATE TABLE Polls (
 CREATE INDEX idx_polls_publish_date ON Polls(publish_date DESC);
 
 -- =================================================================
--- 5. Tábla: DailyAggregates
+-- 5. Tábla: Daily_Aggregates
 -- A fő dashboard motorja (OLAP tábla), napi 1 sor
 -- =================================================================
 CREATE TABLE Daily_Aggregates (
@@ -133,7 +133,7 @@ CREATE TABLE Daily_Aggregates (
 );
 
 -- =================================================================
--- 6. Tábla: DailyPortalAggregates
+-- 6. Tábla: Daily_Portal_Aggregates
 -- A "Nagyító" funkció motorja (OLAP tábla)
 -- =================================================================
 CREATE TABLE Daily_Portal_Aggregates (
