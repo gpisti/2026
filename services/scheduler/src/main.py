@@ -25,4 +25,4 @@ while True:
     except Exception as e:
         print(f"Hiba a feladat küldésekor: {e}")
     
-    time.sleep(10)
+    time.sleep(600)
