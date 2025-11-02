@@ -23,6 +23,25 @@ services:
     volumes:
       - redisdata:/data
 
+  scheduler:
+    container_name: 2026_scheduler
+    build:
+      context: ./services/scheduler
+    command: python src/main.py
+    depends_on:
+      - queue
+    restart: always
+
+  scraper:
+    container_name: 2026_scraper
+    build:
+      context: ./services/scraper
+    command: python src/main.py
+    depends_on:
+      - queue
+      - db
+    restart: always
+
 volumes:
   pgdata:
   redisdata:
