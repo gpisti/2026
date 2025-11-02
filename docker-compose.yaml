@@ -27,22 +27,67 @@ services:
     container_name: 2026_scheduler
     build:
       context: ./services/scheduler
-    command: python src/main.py
-    depends_on:
-      - queue
+    command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+    depends_on:
+      - queue
     restart: always
 
   scraper:
     container_name: 2026_scraper
     build:
       context: ./services/scraper
-    command: python src/main.py
+    command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+    volumes:
+      - ./shared:/app/shared
     depends_on:
       - queue
+      - db
+    restart: always
+
+  processor:
+    container_name: 2026_processor
+    build:
+      context: ./services/processor
+    command: python -m src.main
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./shared:/app/shared
+    depends_on:
+      - queue
+      - db
+    restart: always
+
+  aggregator:
+    container_name: 2026_aggregator
+    build:
+      context: ./services/aggregator
+    command: python -m src.main
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./shared:/app/shared
+    depends_on:
+      - queue
+      - db
+    restart: always
+
+  web_api:
+    container_name: 2026_web_api
+    build:
+      context: ./services/web_api
+    command: python -m src.main
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./shared:/app/shared
+    ports:
+      - "8000:8000"
+    depends_on:
       - db
     restart: always
 
