@@ -31,7 +31,7 @@ CREATE TABLE Portals (
 -- 2. Tábla: RawArticles
 -- A beérkező, feldolgozatlan cikkek "piszkos" logja
 -- =================================================================
-CREATE TABLE RawArticles (
+CREATE TABLE Raw_Articles (
     article_id BIGSERIAL PRIMARY KEY,
     portal_id INT NOT NULL,
     url VARCHAR(2048) NOT NULL,
@@ -58,7 +58,7 @@ CREATE INDEX idx_rawarticles_publish_date ON RawArticles(publish_date);
 -- 3. Tábla: ProcessedArticles
 -- A "dúsított" adatok táblája (NLP kimenete)
 -- =================================================================
-CREATE TABLE ProcessedArticles (
+CREATE TABLE Processed_Articles (
     processed_id BIGSERIAL PRIMARY KEY,
     article_id BIGINT NOT NULL UNIQUE, -- 1:1 kapcsolat a RawArticles-szal
     
@@ -106,7 +106,7 @@ CREATE INDEX idx_polls_publish_date ON Polls(publish_date DESC);
 -- 5. Tábla: DailyAggregates
 -- A fő dashboard motorja (OLAP tábla), napi 1 sor
 -- =================================================================
-CREATE TABLE DailyAggregates (
+CREATE TABLE Daily_Aggregates (
     agg_date DATE PRIMARY KEY,
     
     -- Predikciós Bemenetek (Súlyozott)
@@ -136,7 +136,7 @@ CREATE TABLE DailyAggregates (
 -- 6. Tábla: DailyPortalAggregates
 -- A "Nagyító" funkció motorja (OLAP tábla)
 -- =================================================================
-CREATE TABLE DailyPortalAggregates (
+CREATE TABLE Daily_Portal_Aggregates (
     agg_date DATE NOT NULL,
     portal_id INT NOT NULL,
     
