@@ -1,16 +1,7 @@
-import os
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, TIMESTAMP, ForeignKey, JSON, BigInteger, TEXT, DATE
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.dialects.postgresql import JSONB
-
-
-DB_HOST = os.environ.get("DB_HOST", "db")
-DB_PORT = os.environ.get("DB_PORT", 5432)
-DB_NAME = os.environ.get("DB_NAME", "2026_db")
-DB_USER = os.environ.get("DB_USER", "admin")
-DB_PASS = os.environ.get("DB_PASS", "admin")
-
-DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+from shared.config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
