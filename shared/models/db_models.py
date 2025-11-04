@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, TIMESTAMP, ForeignKey, JSON, BigInteger, TEXT, DATE
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgresUUID
+import uuid
 from shared.config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL)
@@ -10,7 +11,7 @@ Base = declarative_base()
 
 class Portals(Base):
     __tablename__ = 'portals'
-    portal_id = Column(Integer, primary_key=True, autoincrement=True)
+    portal_id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, unique=True)
     rss_feed_url = Column(String(2048), nullable=False, unique=True)
     type = Column(String(50))
@@ -24,8 +25,8 @@ class Portals(Base):
 
 class Raw_Articles(Base):
     __tablename__ = 'raw_articles'
-    article_id = Column(BigInteger, primary_key=True, autoincrement=True)
-    portal_id = Column(Integer, ForeignKey('portals.portal_id', ondelete='RESTRICT'), nullable=False)
+    article_id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portal_id = Column(PostgresUUID(as_uuid=True), ForeignKey('portals.portal_id', ondelete='RESTRICT'), nullable=False)
     url = Column(String(2048), nullable=False, unique=True)
     title = Column(String(1024))
     publish_date = Column(TIMESTAMP(timezone=True))
@@ -40,8 +41,8 @@ class Raw_Articles(Base):
 
 class Processed_Articles(Base):
     __tablename__ = 'processed_articles'
-    processed_id = Column(BigInteger, primary_key=True, autoincrement=True)
-    article_id = Column(BigInteger, ForeignKey('raw_articles.article_id', ondelete='CASCADE'), nullable=False, unique=True)
+    processed_id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    article_id = Column(PostgresUUID(as_uuid=True), ForeignKey('raw_articles.article_id', ondelete='CASCADE'), nullable=False, unique=True)
     mentions_ov = Column(Boolean, default=False, nullable=False)
     mentions_mp = Column(Boolean, default=False, nullable=False)
     sentiment_ov = Column(Float)
@@ -57,7 +58,7 @@ class Processed_Articles(Base):
 
 class Polls(Base):
     __tablename__ = 'polls'
-    poll_id = Column(Integer, primary_key=True, autoincrement=True)
+    poll_id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pollster_name = Column(String(255), nullable=False)
     publish_date = Column(TIMESTAMP(timezone=True), nullable=False)
     percent_ov = Column(Float, nullable=False)
@@ -85,7 +86,7 @@ class Daily_Aggregates(Base):
 class Daily_Portal_Aggregates(Base):
     __tablename__ = 'daily_portal_aggregates'
     agg_date = Column(DATE, primary_key=True)
-    portal_id = Column(Integer, ForeignKey('portals.portal_id', ondelete='CASCADE'), primary_key=True)
+    portal_id = Column(PostgresUUID(as_uuid=True), ForeignKey('portals.portal_id', ondelete='CASCADE'), primary_key=True)
     total_articles = Column(Integer)
     total_mentions_ov = Column(Integer)
     total_mentions_mp = Column(Integer)

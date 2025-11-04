@@ -4,6 +4,9 @@
 -- Dialektus: PostgreSQL
 -- =================================================================
 
+-- UUID extension engedélyezése
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 -- Táblák törlése, ha már léteznek
 DROP TABLE IF EXISTS Daily_Portal_Aggregates CASCADE;
 DROP TABLE IF EXISTS Daily_Aggregates CASCADE;
@@ -17,7 +20,7 @@ DROP TABLE IF EXISTS Polls CASCADE;
 -- A figyelt hírportálok "címjegyzéke"
 -- =================================================================
 CREATE TABLE Portals (
-    portal_id SERIAL PRIMARY KEY,
+    portal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL UNIQUE,
     rss_feed_url VARCHAR(2048) NOT NULL UNIQUE,
     type VARCHAR(50), -- pl. 'kormanykozeli', 'fuggetlen', 'ellenzeki'
@@ -32,8 +35,8 @@ CREATE TABLE Portals (
 -- A beérkező, feldolgozatlan cikkek "piszkos" logja
 -- =================================================================
 CREATE TABLE Raw_Articles (
-    article_id BIGSERIAL PRIMARY KEY,
-    portal_id INT NOT NULL,
+    article_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    portal_id UUID NOT NULL,
     url VARCHAR(2048) NOT NULL,
     title VARCHAR(1024),
     publish_date TIMESTAMP WITH TIME ZONE,
@@ -59,8 +62,8 @@ CREATE INDEX idx_rawarticles_publish_date ON Raw_Articles(publish_date);
 -- A "dúsított" adatok táblája (NLP kimenete)
 -- =================================================================
 CREATE TABLE Processed_Articles (
-    processed_id BIGSERIAL PRIMARY KEY,
-    article_id BIGINT NOT NULL UNIQUE, -- 1:1 kapcsolat a Raw_Articles-szal
+    processed_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    article_id UUID NOT NULL UNIQUE,
     
     -- NLP Eredmények
     mentions_ov BOOLEAN DEFAULT false NOT NULL,
@@ -92,7 +95,7 @@ CREATE INDEX idx_processedarticles_topic ON Processed_Articles(topic);
 -- A "Szent Grál": A valós közvéleménykutatási adatok
 -- =================================================================
 CREATE TABLE Polls (
-    poll_id SERIAL PRIMARY KEY,
+    poll_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     pollster_name VARCHAR(255) NOT NULL, -- pl. 'Medián', 'Nézőpont'
     publish_date TIMESTAMP WITH TIME ZONE NOT NULL,
     percent_ov FLOAT NOT NULL,
@@ -138,7 +141,7 @@ CREATE TABLE Daily_Aggregates (
 -- =================================================================
 CREATE TABLE Daily_Portal_Aggregates (
     agg_date DATE NOT NULL,
-    portal_id INT NOT NULL,
+    portal_id UUID NOT NULL,
     
     -- Metrikák
     total_articles INT,
