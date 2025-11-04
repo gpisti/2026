@@ -1,3 +1,5 @@
 redis
 sqlalchemy
 psycopg2-binary
+requests
+beautifulsoup4
