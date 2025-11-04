@@ -1,7 +1,6 @@
 import time
 import logging
-import requests
-from bs4 import BeautifulSoup
+from newspaper import Article, ArticleException
 
 from shared.connections import get_redis_connection, get_db_session
 from shared.models.db_models import Raw_Articles, Processed_Articles
@@ -13,26 +12,22 @@ log.info("--- Processor Service Indul (v2 - Scraper & Parser) ---")
 
 def fetch_and_clean_article_text(url: str) -> str | None:
     """Downloads the full HTML of an article and extracts the clean text."""
-    headers = {'User-Agent': '2026-Scraper-Bot/1.0'}
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        article = Article(url)
+        article.download()
+        article.parse()
         
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        paragraphs = soup.find_all('p')
-        
-        if not paragraphs:
-            log.warning(f"Nem található <p> tag a cikkben: {url}")
+        if not article.text:
+            log.warning(f"A newspaper3k nem talált szöveget a cikkben: {url}")
             return None
-
-        full_text = "\n".join([p.get_text(strip=True) for p in paragraphs])
+            
+        cleaned_text = article.text
+        log.info(f"Sikeres szöveg-kinyerés, hossza: {len(cleaned_text)} karakter ({url})")
         
-        log.info(f"Sikeres szöveg-kinyerés, hossza: {len(full_text)} karakter ({url})")
-        return full_text
+        return cleaned_text
 
-    except requests.exceptions.RequestException as e:
-        log.error(f"Hiba a cikk letöltésekor ({url}): {e}")
+    except ArticleException as e:
+        log.error(f"Hiba a cikk letöltésekor (ArticleException): {e}")
         return None
     except Exception as e:
         log.error(f"Váratlan hiba a HTML tisztításakor ({url}): {e}")
