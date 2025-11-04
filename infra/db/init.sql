@@ -155,3 +155,26 @@ CREATE TABLE Daily_Portal_Aggregates (
         REFERENCES Portals(portal_id)
         ON DELETE CASCADE -- Ha törlünk egy portált, törlődjön az aggregátuma is
 );
+
+-- =================================================================
+-- 7. Alapértelmezett Portálok Beszúrása
+-- =================================================================
+INSERT INTO Portals (name, rss_feed_url, type)
+VALUES 
+    -- Új független / mainstream
+    ('24.hu - Belföld', 'https://24.hu/rss/belfold/', 'fuggetlen'),
+    ('Portfolio - Gazdaság', 'https://www.portfolio.hu/rss/cikk/gazdasag', 'gazdasagi'),
+    
+    -- Új ellenzéki / kritikus
+    ('Népszava', 'https://nepszava.hu/rss', 'ellenzeki_kritikus'),
+    ('ATV', 'https://www.atv.hu/rss', 'ellenzeki_kritikus'),
+    
+    -- Új kormánypárti
+    ('Hír TV', 'https://hirtv.hu/rss', 'kormanykozeli'),
+    ('Magyar Hírlap', 'https://www.magyarhirlap.hu/rss', 'kormanykozeli'),
+    ('Pesti Srácok', 'https://pestisracok.hu/feed/', 'kormanykozeli'),
+    
+    -- Bulvár (fontos a "közhangulat" méréséhez)
+    ('Blikk - Politika', 'https://www.blikk.hu/rss/politika', 'bulvar'),
+    ('Bors', 'https://borsonline.hu/feed', 'bulvar')
+ON CONFLICT (name) DO NOTHING;
