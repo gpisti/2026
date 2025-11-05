@@ -3,3 +3,6 @@ sqlalchemy
 psycopg2-binary
 newspaper3k
 lxml_html_clean
+transformers
+torch
+sentencepiece

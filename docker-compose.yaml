@@ -30,6 +30,8 @@ services:
     command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+    dns:
+      - 8.8.8.8
     depends_on:
       - queue
     restart: always
@@ -41,6 +43,8 @@ services:
     command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+    dns:
+      - 8.8.8.8
     volumes:
       - ./shared:/app/shared
     depends_on:
@@ -55,6 +59,8 @@ services:
     command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+    dns:
+      - 8.8.8.8
     volumes:
       - ./shared:/app/shared
     depends_on:
@@ -69,6 +75,8 @@ services:
     command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+    dns:
+      - 8.8.8.8
     volumes:
       - ./shared:/app/shared
     depends_on:
@@ -83,6 +91,8 @@ services:
     command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+    dns:
+      - 8.8.8.8
     volumes:
       - ./shared:/app/shared
     ports:
