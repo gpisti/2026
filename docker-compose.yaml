@@ -56,9 +56,10 @@ services:
     container_name: 2026_processor
     build:
       context: ./services/processor
-    command: python -m src.main
+    command: python src/main.py
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
     dns:
       - 8.8.8.8
     volumes:
