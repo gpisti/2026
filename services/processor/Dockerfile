@@ -4,8 +4,11 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    python -m nltk.downloader punkt -d /usr/local/nltk_data
+
+ENV NLTK_DATA=/usr/local/nltk_data
 
 COPY src/ ./src/
 
-CMD ["python", "src/main.py"]
+CMD ["python", "-m", "src.main"]

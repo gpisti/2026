@@ -56,7 +56,7 @@ services:
     container_name: 2026_processor
     build:
       context: ./services/processor
-    command: python src/main.py
+    command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app

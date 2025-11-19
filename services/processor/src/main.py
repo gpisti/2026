@@ -1,6 +1,6 @@
 import time
 import logging
-from newspaper import Article, ArticleException
+from newspaper import Article
 from transformers import pipeline
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +20,7 @@ try:
     ner_pipeline = pipeline("ner", model=NER_MODEL_NAME, aggregation_strategy="simple")
     log.info(f"✓ NER modell betöltve: {NER_MODEL_NAME}")
     
-    SENTIMENT_MODEL_NAME = "cmarkea/distilbert-base-hungarian-cased-sentiment-full"
+    SENTIMENT_MODEL_NAME = "NYTK/sentiment-ohb3-hubert-hungarian"
     sentiment_pipeline = pipeline("sentiment-analysis", model=SENTIMENT_MODEL_NAME)
     log.info(f"✓ Sentiment modell betöltve: {SENTIMENT_MODEL_NAME}")
     
