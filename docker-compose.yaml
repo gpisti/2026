@@ -113,6 +113,18 @@ services:
     environment:
       - JUPYTER_TOKEN=mentor2026
 
+  pgadmin:
+    container_name: 2026_pgadmin
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@mentor.local
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+
 volumes:
   pgdata:
   redisdata:

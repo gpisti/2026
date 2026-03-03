@@ -2,3 +2,5 @@ redis
 sqlalchemy
 psycopg2-binary
 feedparser
+trafilatura
+requests

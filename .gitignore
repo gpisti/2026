@@ -1,11 +1,14 @@
 .env
 .venv
 __pycache__
+__pycache__/
+*.pyc
 test_*.py
 .vscode
 
 # Data Science & Jupyter
 research/mock_data/
+research/*/mock_data/
 .ipynb_checkpoints/
-__pycache__/
-*.pyc
+research/*/.ipynb_checkpoints/
+research/
