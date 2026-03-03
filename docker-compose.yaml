@@ -1,5 +1,5 @@
 services:
-  
+
   db:
     image: postgres:16-alpine
     container_name: 2026_db
@@ -101,6 +101,17 @@ services:
     depends_on:
       - db
     restart: always
+
+  jupyter_research:
+    container_name: 2026_jupyter_research
+    build:
+      context: ./research
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./research:/app
+    environment:
+      - JUPYTER_TOKEN=mentor2026
 
 volumes:
   pgdata:

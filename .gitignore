@@ -3,3 +3,9 @@
 __pycache__
 test_*.py
 .vscode
+
+# Data Science & Jupyter
+research/mock_data/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
