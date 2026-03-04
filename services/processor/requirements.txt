@@ -1,9 +1,3 @@
 redis
 sqlalchemy
 psycopg2-binary
-newspaper3k
-lxml_html_clean
-transformers
-torch --index-url https://download.pytorch.org/whl/cpu
-sentencepiece
-nltk
