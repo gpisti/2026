@@ -113,6 +113,23 @@ services:
     environment:
       - JUPYTER_TOKEN=mentor2026
 
+  metrics_updater:
+    container_name: 2026_metrics_updater
+    build:
+      context: ./services/metrics_updater
+    command: python -m src.main
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://admin:admin@db:5432/2026_db
+      - SHAREDCOUNT_API_KEY=${SHAREDCOUNT_API_KEY}
+      - METRICS_POLL_INTERVAL=30
+    dns:
+      - 8.8.8.8
+    depends_on:
+      - db
+      - queue
+    restart: always
+
   pgadmin:
     container_name: 2026_pgadmin
     image: dpage/pgadmin4
@@ -125,6 +142,23 @@ services:
     depends_on:
       - db
 
+  sentiment_analyzer:
+    container_name: 2026_sentiment_analyzer
+    build:
+      context: ./services/sentiment_analyzer
+    command: python -m src.main
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://admin:admin@db:5432/2026_db
+      - SENTIMENT_POLL_INTERVAL=30
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
+    depends_on:
+      - db
+      - metrics_updater
+    restart: always
+
 volumes:
   pgdata:
   redisdata:
+  huggingface_cache:
