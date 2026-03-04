@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import requests
+from urllib.parse import urlparse, urlunparse
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -32,33 +33,53 @@ SessionLocal = sessionmaker(bind=engine)
 
 
 def ensure_metrics_table():
-    """Létrehozza az article_metrics táblát, ha még nem létezik."""
+    """Létrehozza az article_metrics táblát (ha kell), és gondoskodik az updated_at oszlopról."""
     with engine.connect() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS article_metrics (
-                article_id    UUID PRIMARY KEY REFERENCES raw_articles(article_id) ON DELETE CASCADE,
+                article_id       UUID PRIMARY KEY REFERENCES raw_articles(article_id) ON DELETE CASCADE,
                 fb_interactions  INTEGER DEFAULT 0,
                 reddit_upvotes   INTEGER DEFAULT 0,
                 reddit_comments  INTEGER DEFAULT 0,
-                last_updated  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                last_updated     TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at       TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             )
         """))
+        # Ha a tábla már létezett updated_at nélkül, adjuk hozzá
+        conn.execute(text("""
+            ALTER TABLE article_metrics
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        """))
         conn.commit()
-    log.info("✓ article_metrics tábla ellenőrizve/létrehozva.")
+    log.info("✓ article_metrics tábla ellenőrizve/létrehozva (updated_at oszloppal).")
+
+
+# ---------------------------------------------------------------------------
+# URL tisztítás
+# ---------------------------------------------------------------------------
+def sanitize_url(url: str) -> str:
+    """
+    Eltávolítja a query paramétereket és fragmentumot az URL-ről.
+    Csak a scheme + netloc + path marad meg — ez megy az API-khoz.
+    Pl. 'https://hvg.hu/itthon/cikk?utm_source=rss#top' -> 'https://hvg.hu/itthon/cikk'
+    """
+    parsed = urlparse(url)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
 
 
 # ---------------------------------------------------------------------------
 # API hívások
 # ---------------------------------------------------------------------------
 def fetch_sharedcount(url: str) -> int:
-    """SharedCount API — Facebook interakciók lekérése."""
+    """SharedCount API — Facebook interakciók lekérése (tisztított URL-lel)."""
     if not SHAREDCOUNT_API_KEY:
         log.warning("SHAREDCOUNT_API_KEY nincs beállítva, FB adat kihagyva.")
         return 0
+    clean = sanitize_url(url)
     try:
         resp = requests.get(
             "https://api.sharedcount.com/v1.0/",
-            params={"url": url, "apikey": SHAREDCOUNT_API_KEY},
+            params={"url": clean, "apikey": SHAREDCOUNT_API_KEY},
             timeout=10
         )
         resp.raise_for_status()
@@ -71,15 +92,16 @@ def fetch_sharedcount(url: str) -> int:
             fb.get("reaction_count", 0)
         )
     except Exception as e:
-        log.warning(f"SharedCount hiba ({url}): {e}")
+        log.warning(f"SharedCount hiba ({clean}): {e}")
         return 0
 
 
 def fetch_reddit(url: str) -> tuple[int, int]:
-    """Reddit search JSON — upvote és kommentszám lekérése."""
+    """Reddit search JSON — upvote és kommentszám lekérése (tisztított URL-lel)."""
+    clean = sanitize_url(url)
     try:
         resp = requests.get(
-            f"https://www.reddit.com/search.json?q=url:{url}",
+            f"https://www.reddit.com/search.json?q=url:{clean}",
             headers=REDDIT_HEADERS,
             timeout=10
         )
@@ -91,7 +113,7 @@ def fetch_reddit(url: str) -> tuple[int, int]:
         best = max(children, key=lambda c: c["data"].get("score", 0))["data"]
         return best.get("score", 0), best.get("num_comments", 0)
     except Exception as e:
-        log.warning(f"Reddit hiba ({url}): {e}")
+        log.warning(f"Reddit hiba ({clean}): {e}")
         return 0, 0
 
 
@@ -100,35 +122,43 @@ def fetch_reddit(url: str) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 def fetch_pending_articles(db) -> list:
     """
-    Visszaadja azokat a cikkeket, amelyek már szerepelnek az
-    article_entity_mentions táblában, de még NINCSENEK az article_metrics-ben.
+    Többlépcsős polling:
+    - Csak az elmúlt 48 órában bekerült cikkeket nézzük (aktív életciklus).
+    - Feldolgozza, ha: még nincs metrikája, VAGY az utolsó frissítés 6+ órája volt.
+    - Az érlelési szűrő (3 óra) megmarad: csak scraped_at <= NOW() - 3h cikkeket vesz.
     """
     rows = db.execute(text("""
         SELECT DISTINCT ra.article_id, ra.url
         FROM raw_articles ra
         INNER JOIN article_entity_mentions aem ON aem.article_id = ra.article_id
         LEFT JOIN article_metrics am ON am.article_id = ra.article_id
-        WHERE am.article_id IS NULL
-          AND ra.url IS NOT NULL
+        WHERE ra.url IS NOT NULL
+          AND ra.scraped_at >= NOW() - INTERVAL '48 hours'
           AND ra.scraped_at <= NOW() - INTERVAL '3 hours'
+          AND (
+            am.article_id IS NULL
+            OR am.updated_at <= NOW() - INTERVAL '6 hours'
+          )
         LIMIT 20
     """)).fetchall()
     return rows
 
 
 def update_metrics_for_article(db, article_id: str, url: str):
-    """Lekéri a metrikákat és elmenti az article_metrics táblába."""
-    fb_interactions = fetch_sharedcount(url)
+    """Lekéri a metrikákat és elmenti/frissíti az article_metrics táblában."""
+    fb_interactions = fetch_sharedcount(url)   # URL tisztítás a függvényen belül történik
     reddit_upvotes, reddit_comments = fetch_reddit(url)
 
     db.execute(text("""
-        INSERT INTO article_metrics (article_id, fb_interactions, reddit_upvotes, reddit_comments, last_updated)
-        VALUES (:article_id, :fb, :ru, :rc, NOW())
+        INSERT INTO article_metrics
+            (article_id, fb_interactions, reddit_upvotes, reddit_comments, last_updated, updated_at)
+        VALUES (:article_id, :fb, :ru, :rc, NOW(), NOW())
         ON CONFLICT (article_id) DO UPDATE SET
             fb_interactions = EXCLUDED.fb_interactions,
             reddit_upvotes  = EXCLUDED.reddit_upvotes,
             reddit_comments = EXCLUDED.reddit_comments,
-            last_updated    = NOW()
+            last_updated    = NOW(),
+            updated_at      = NOW()
     """), {
         "article_id": str(article_id),
         "fb": fb_interactions,
@@ -136,7 +166,11 @@ def update_metrics_for_article(db, article_id: str, url: str):
         "rc": reddit_comments,
     })
     db.commit()
-    log.info(f"Metrics frissítve a [{url}] cikkhez — FB: {fb_interactions}, Reddit upvotes: {reddit_upvotes}, Reddit comments: {reddit_comments}")
+    clean = sanitize_url(url)
+    log.info(
+        f"Metrics frissítve: [{clean}] — "
+        f"FB: {fb_interactions}, Reddit upvotes: {reddit_upvotes}, comments: {reddit_comments}"
+    )
 
 
 # ---------------------------------------------------------------------------
