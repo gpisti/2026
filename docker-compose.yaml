@@ -76,13 +76,15 @@ services:
     command: python -m src.main
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://admin:admin@db:5432/2026_db
+      - AGGREGATOR_INTERVAL=600
     dns:
       - 8.8.8.8
     volumes:
       - ./shared:/app/shared
     depends_on:
-      - queue
       - db
+      - sentiment_analyzer
     restart: always
 
   web_api:

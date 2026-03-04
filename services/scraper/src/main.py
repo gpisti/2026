@@ -47,8 +47,9 @@ HEADERS = {
 # ---------------------------------------------------------------------------
 def sync_portals_to_db(db) -> dict[str, object]:
     """
-    Upsert-eli az RSS_SOURCES listát a portals táblába (name alapján),
-    és visszaad egy {name -> Portal ORM objektum} szótárat.
+    Upsert-eli az RSS_SOURCES listát a portals táblába (name alapján).
+    Visszaad egy {name -> portal_id (UUID)} szótárat — csak a nyers ID-t,
+    nem az ORM objektumot, hogy elkerüljük a DetachedInstanceError-t.
     """
     portal_map = {}
     for src in RSS_SOURCES:
@@ -59,7 +60,7 @@ def sync_portals_to_db(db) -> dict[str, object]:
                 existing.rss_feed_url = src["rss_feed_url"]
                 log.info(f"  ↻ RSS URL frissítve: {src['name']}")
             existing.is_active = True
-            portal_map[src["name"]] = existing
+            portal_map[src["name"]] = existing.portal_id   # csak az ID!
         else:
             new_portal = Portals(
                 name=src["name"],
@@ -68,8 +69,8 @@ def sync_portals_to_db(db) -> dict[str, object]:
                 is_active=True,
             )
             db.add(new_portal)
-            db.flush()      # portal_id generáláshoz commit előtt
-            portal_map[src["name"]] = new_portal
+            db.flush()   # portal_id generáláshoz commit előtt
+            portal_map[src["name"]] = new_portal.portal_id  # csak az ID!
             log.info(f"  + Új portál hozzáadva: {src['name']}")
     db.commit()
     log.info(f"✓ {len(portal_map)} portál szinkronizálva az adatbázissal.")
@@ -79,8 +80,8 @@ def sync_portals_to_db(db) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 # Feed feldolgozás
 # ---------------------------------------------------------------------------
-def parse_feed_and_save(db, redis_conn, portal_obj, rss_url: str, portal_name: str) -> int:
-    """Letölti és feldolgozza egy portál RSS feedjét."""
+def parse_feed_and_save(db, redis_conn, portal_id, rss_url: str, portal_name: str) -> int:
+    """Letölti és feldolgozza egy portál RSS feedjét. portal_id egy nyers UUID."""
     try:
         response = requests.get(rss_url, headers=HEADERS, timeout=10)
         response.raise_for_status()
@@ -118,7 +119,7 @@ def parse_feed_and_save(db, redis_conn, portal_obj, rss_url: str, portal_name: s
                 log.warning(f"Trafilatura hiba ({entry.link}): {fetch_err}")
 
             new_article = Raw_Articles(
-                portal_id=portal_obj.portal_id,
+                portal_id=portal_id,
                 url=entry.link,
                 title=entry.title,
                 publish_date=publish_time,
@@ -175,14 +176,14 @@ while True:
                 log.info(f"=== {len(RSS_SOURCES)} portál scrapelése ===")
 
                 for src in RSS_SOURCES:
-                    portal_obj = PORTAL_MAP.get(src["name"])
-                    if not portal_obj:
+                    portal_id = PORTAL_MAP.get(src["name"])
+                    if not portal_id:
                         log.warning(f"Portál nem található a mapben: {src['name']} — kihagyva.")
                         continue
                     try:
                         count = parse_feed_and_save(
                             db, r_conn,
-                            portal_obj=portal_obj,
+                            portal_id=portal_id,
                             rss_url=src["rss_feed_url"],
                             portal_name=src["name"],
                         )
