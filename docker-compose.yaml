@@ -160,6 +160,20 @@ services:
       - metrics_updater
     restart: always
 
+  dashboard:
+    container_name: 2026_dashboard
+    build:
+      context: ./services/dashboard
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://admin:admin@db:5432/2026_db
+    ports:
+      - "8501:8501"
+    depends_on:
+      - db
+      - aggregator
+    restart: always
+
 volumes:
   pgdata:
   redisdata:

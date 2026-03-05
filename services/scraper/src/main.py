@@ -1,4 +1,5 @@
 import time
+import random
 import logging
 import feedparser
 import trafilatura
@@ -82,15 +83,31 @@ def sync_portals_to_db(db) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 def parse_feed_and_save(db, redis_conn, portal_id, rss_url: str, portal_name: str) -> int:
     """Letölti és feldolgozza egy portál RSS feedjét. portal_id egy nyers UUID."""
-    try:
-        response = requests.get(rss_url, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        feed = feedparser.parse(response.content)
-    except requests.exceptions.RequestException as e:
-        log.error(f"Feed letöltési hiba ({portal_name}): {e}")
-        return 0
-    except Exception as e:
-        log.error(f"Váratlan hiba feed parse-olásakor ({portal_name}): {e}")
+    MAX_RETRIES = 2
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(rss_url, headers=HEADERS, timeout=10)
+            if response.status_code == 429:
+                wait = 30 * attempt
+                log.warning(
+                    f"HTTP 429 Too Many Requests ({portal_name}) — "
+                    f"várakozás {wait}s, majd újrapróbálkozás ({attempt}/{MAX_RETRIES})..."
+                )
+                time.sleep(wait)
+                continue   # újrapróbálja a ciklus következő iterációja
+            response.raise_for_status()
+            feed = feedparser.parse(response.content)
+            break   # sikeres letöltés, kilép a retry loopból
+        except requests.exceptions.RequestException as e:
+            log.error(f"Feed letöltési hiba ({portal_name}, kísérlet {attempt}): {e}")
+            if attempt == MAX_RETRIES:
+                return 0
+            time.sleep(10)
+        except Exception as e:
+            log.error(f"Váratlan hiba feed parse-olásakor ({portal_name}): {e}")
+            return 0
+    else:
+        log.error(f"Feed letöltés végleg sikertelen: {portal_name}")
         return 0
 
     if feed.bozo:
@@ -110,6 +127,11 @@ def parse_feed_and_save(db, redis_conn, portal_id, rss_url: str, portal_name: st
                 pass
 
         try:
+            # --- Stealth delay: véletlenszerű várakozás a kérések között ---
+            delay = random.uniform(3, 7)
+            log.debug(f"Stealth delay: {delay:.1f}s ({portal_name})")
+            time.sleep(delay)
+
             article_text = None
             try:
                 downloaded = trafilatura.fetch_url(entry.link)
