@@ -1,7 +1,9 @@
 import os
 import time
+import random
 import logging
 import requests
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urlunparse
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -23,6 +25,16 @@ POLL_INTERVAL_SECONDS = int(os.getenv("METRICS_POLL_INTERVAL", "30"))
 
 REDDIT_HEADERS = {
     "User-Agent": "2026-MetricsBot/1.0 (research project; contact: admin@mentor.local)"
+}
+
+# Böngésző-szintű fejléc a canonical URL letöltéshez
+SCRAPE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "hu-HU,hu;q=0.9,en;q=0.8",
 }
 
 # ---------------------------------------------------------------------------
@@ -65,6 +77,32 @@ def sanitize_url(url: str) -> str:
     """
     parsed = urlparse(url)
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+
+def get_canonical_url(url: str) -> str:
+    """
+    Letölti a cikk HTML-jét, és megkeresi a <link rel="canonical"> taget.
+    Ha megtalálja és érvényes, azt adja vissza (ez az URL, amit a Facebook indexelt).
+    Hiba (timeout, 404, nincs tag) esetén fallback: az eredeti tiszta URL.
+    """
+    clean = sanitize_url(url)
+    try:
+        # Véletlenszerű delay, hogy elkerüljük a 429-es hibákat
+        time.sleep(random.uniform(1, 3))
+        resp = requests.get(clean, headers=SCRAPE_HEADERS, timeout=8, allow_redirects=True)
+        if resp.status_code != 200:
+            return clean
+        soup = BeautifulSoup(resp.text, "html.parser")
+        tag = soup.find("link", rel="canonical")
+        if tag and tag.get("href"):
+            canonical = tag["href"].strip()
+            # Csak HTTPS URL-t fogadunk el, relatív linkeket kihagyjuk
+            if canonical.startswith("http"):
+                log.debug(f"Canonical találva: {canonical} (eredeti: {clean})")
+                return canonical
+    except Exception as e:
+        log.debug(f"Canonical URL lekérés sikertelen ({clean}): {e}")
+    return clean
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +184,13 @@ def fetch_pending_articles(db) -> list:
 
 def update_metrics_for_article(db, article_id: str, url: str):
     """Lekéri a metrikákat és elmenti/frissíti az article_metrics táblában."""
-    fb_interactions = fetch_sharedcount(url)   # URL tisztítás a függvényen belül történik
-    reddit_upvotes, reddit_comments = fetch_reddit(url)
+    # Canonical URL egyszeri meghatározása (ez megy mind a két API-nak)
+    canonical = get_canonical_url(url)
+    if canonical != sanitize_url(url):
+        log.info(f"Canonical URL használata: {canonical} (helyett: {sanitize_url(url)})")
+
+    fb_interactions = fetch_sharedcount(canonical)
+    reddit_upvotes, reddit_comments = fetch_reddit(canonical)
 
     db.execute(text("""
         INSERT INTO article_metrics
