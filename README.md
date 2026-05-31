@@ -130,10 +130,10 @@ A Dashboard **nem csatlakozik közvetlenül az adatbázishoz**. Minden adat a We
 A Processor a `keywords` táblából betöltött kulcsszavakból entitásonként egyetlen kompakt reguláris kifejezést fordít előre. A kifejezések hossz szerint csökkenő sorrendben (greedy matching elkerülésére) kerülnek a mintába:
 
 ```
-pattern_e = \b(k₁|k₂|...|kₙ)\b        (IGNORECASE)
+pattern_e = \b(k1|k2|...|kn)\b        (IGNORECASE)
 ```
 
-Minden `kᵢ` egy entitáshoz tartozó kulcsszó vagy alias (a `keywords.aliases` JSONB oszlopból). A `\b` szóhatár-biztosítás megakadályozza a fals pozitív substring találatokat (pl. `"fidesz"` nem illik `"fideszes"`-re, hacsak az nincs expliciten aliasként felvéve).
+Minden `ki` egy entitáshoz tartozó kulcsszó vagy alias (a `keywords.aliases` JSONB oszlopból). A `\b` szóhatár-biztosítás megakadályozza a fals pozitív substring találatokat (pl. `"fidesz"` nem illik `"fideszes"`-re, hacsak az nincs expliciten aliasként felvéve).
 
 Az illesztés eredménye az `article_entity_mentions` kapcsolótáblába kerül: `(article_id, entity_id, matched_keyword)`.
 
@@ -153,10 +153,10 @@ $$
 \tilde{W}_{e,a}^{(i)} = \text{mask}\bigl(W_{e,a}^{(i)},\ K_{\text{all}\,\setminus\,e}\bigr)
 $$
 
-ahol $K_{\text{all} \setminus e}$ az összes entitás kulcsszavainak uniója, kivéve az éppen vizsgált $e$ entitást. A maszkolás egyetlen regex `sub` művelettel történik:
+ahol $K_{\text{all} \setminus \{e\}}$ az összes entitás kulcsszavainak uniója, kivéve az éppen vizsgált $e$ entitást. A maszkolás egyetlen regex `sub` művelettel történik:
 
 ```
-pattern_mask = \b(other_k₁|other_k₂|...|other_kₙ)\b  →  [MÁSIK_SZEREPLŐ]
+pattern_mask = \b(other_k1|other_k2|...|other_kn)\b  →  [MASIK_SZEREPLO]
 ```
 
 **Szentiment számítás:** A modell minden címkére valószínűséget ad (`top_k=None`). A score a pozitív és negatív osztály valószínűségének különbsége:
@@ -178,7 +178,7 @@ $$
 A Metrics Updater két forrásból gyűjt elérési metrikákat:
 
 $$
-R(a) = \text{FB\_interactions}(a) + \text{Reddit\_upvotes}(a) + \text{Reddit\_comments}(a)
+R(a) = \mathrm{FB}(a) + \mathrm{Reddit}_{\uparrow}(a) + \mathrm{Reddit}_{\leftrightarrow}(a)
 $$
 
 - **Facebook:** SharedCount API v1.0 — `total_count` vagy `share + comment + reaction`
