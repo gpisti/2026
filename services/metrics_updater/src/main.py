@@ -160,22 +160,44 @@ def fetch_reddit(url: str) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 def fetch_pending_articles(db) -> list:
     """
-    Többlépcsős polling:
-    - Csak az elmúlt 48 órában bekerült cikkeket nézzük (aktív életciklus).
-    - Feldolgozza, ha: még nincs metrikája, VAGY az utolsó frissítés 6+ órája volt.
-    - Az érlelési szűrő (3 óra) megmarad: csak scraped_at <= NOW() - 3h cikkeket vesz.
+    Decay Polling — 3 lépcsős pollolási ütem a cikk kora alapján:
+
+      < 2 óra  : 15 percenként frissít (virális növekedés ablaka)
+      2-12 óra : 1 óránként frissít
+      12-48 óra: 6 óránként frissít
+
+    Ha a cikknek még egyszer sem számolták a metrikáit (am IS NULL), az is bekerül.
+    A 3 órás érlelési szűrő ELTÁVOLÍTVA — az első tier (<2h) ezt felülírná.
     """
     rows = db.execute(text("""
         SELECT DISTINCT ra.article_id, ra.url
         FROM raw_articles ra
         INNER JOIN article_entity_mentions aem ON aem.article_id = ra.article_id
-        LEFT JOIN article_metrics am ON am.article_id = ra.article_id
+        LEFT  JOIN article_metrics am          ON am.article_id  = ra.article_id
         WHERE ra.url IS NOT NULL
           AND ra.scraped_at >= NOW() - INTERVAL '48 hours'
-          AND ra.scraped_at <= NOW() - INTERVAL '3 hours'
           AND (
+            -- 1. Még soha nem frissített — mindig bekerül
             am.article_id IS NULL
-            OR am.updated_at <= NOW() - INTERVAL '6 hours'
+
+            -- 2. Friss cikk (< 2 óra): 15 percenként
+            OR (
+              ra.scraped_at >= NOW() - INTERVAL '2 hours'
+              AND am.updated_at <= NOW() - INTERVAL '15 minutes'
+            )
+
+            -- 3. Közép-korú (2-12 óra): óránként
+            OR (
+              ra.scraped_at <  NOW() - INTERVAL '2 hours'
+              AND ra.scraped_at >= NOW() - INTERVAL '12 hours'
+              AND am.updated_at <= NOW() - INTERVAL '1 hour'
+            )
+
+            -- 4. Öreg cikk (12-48 óra): 6 óránként
+            OR (
+              ra.scraped_at < NOW() - INTERVAL '12 hours'
+              AND am.updated_at <= NOW() - INTERVAL '6 hours'
+            )
           )
         LIMIT 20
     """)).fetchall()

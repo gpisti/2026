@@ -20,6 +20,8 @@ CONTEXT_WINDOW_WORDS = 50   # entitás körüli ablak: 50 szó előtte + 50 utá
 FALLBACK_WORDS = 100        # ha az entitást nem találja, az első 100 szót veszi
 BATCH_SIZE = 10
 
+ENTITY_KEYWORDS_CACHE: dict[int, dict] = {}
+
 # ---------------------------------------------------------------------------
 # DB kapcsolat
 # ---------------------------------------------------------------------------
@@ -54,40 +56,90 @@ log.info("✓ Modell betöltve.")
 
 
 # ---------------------------------------------------------------------------
-# Szövegablak (Context Window) kivágása entitás körül
+# Entitás kulcsszó cache betöltése DB-ből
 # ---------------------------------------------------------------------------
-def extract_context_window(full_text: str, entity_name: str,
-                           window: int = CONTEXT_WINDOW_WORDS,
-                           fallback: int = FALLBACK_WORDS) -> str:
-    """
-    Megkeresi az entity_name első előfordulását a full_text-ben (case-insensitive),
-    és kivágja a körülötte lévő +/- `window` szavas ablakot.
+def load_entity_keywords_cache(db) -> dict[int, dict]:
+    rows = db.execute(text("""
+        SELECT k.entity_id, pe.name AS entity_name, k.keyword, k.aliases
+        FROM keywords k
+        JOIN political_entities pe ON pe.id = k.entity_id
+    """)).fetchall()
 
-    Ha nem találja, az első `fallback` szót adja vissza.
-    """
-    if not full_text or not entity_name:
-        return " ".join(full_text.split()[:fallback]) if full_text else ""
+    cache: dict[int, dict] = {}
+    for row in rows:
+        eid = row.entity_id
+        if eid not in cache:
+            cache[eid] = {"name": row.entity_name, "keywords": set()}
+        cache[eid]["keywords"].add(row.keyword.lower())
+        aliases = row.aliases
+        if aliases and isinstance(aliases, list):
+            for alias in aliases:
+                if alias:
+                    cache[eid]["keywords"].add(alias.lower())
+
+    log.info(
+        "✓ Entitás kulcsszó cache betöltve: %d entitás, %d kifejezés.",
+        len(cache),
+        sum(len(v["keywords"]) for v in cache.values()),
+    )
+    return cache
+
+
+# ---------------------------------------------------------------------------
+# Maszkolás: más entitások kulcsszavainak cseréje [MÁSIK_SZEREPLŐ]-re
+# ---------------------------------------------------------------------------
+def mask_other_entities(text: str, current_entity_id: int, cache: dict[int, dict]) -> str:
+    other_keywords: set[str] = set()
+    for eid, data in cache.items():
+        if eid != current_entity_id:
+            other_keywords.update(data["keywords"])
+
+    if not other_keywords:
+        return text
+
+    sorted_terms = sorted(other_keywords, key=len, reverse=True)
+    escaped = [re.escape(t) for t in sorted_terms]
+    pattern = re.compile(r"\b(" + "|".join(escaped) + r")\b", re.IGNORECASE)
+    return pattern.sub("[MÁSIK_SZEREPLŐ]", text)
+
+
+# ---------------------------------------------------------------------------
+# Kontextusablakok kinyerése re.finditer-rel (az entitás ÖSSZES előfordulása)
+# ---------------------------------------------------------------------------
+def find_all_context_windows(
+    full_text: str,
+    entity_keywords: set[str],
+    window: int = CONTEXT_WINDOW_WORDS,
+    fallback: int = FALLBACK_WORDS,
+) -> list[str]:
+    if not full_text or not entity_keywords:
+        return []
 
     words = full_text.split()
-    entity_lower = entity_name.lower()
-    text_lower = full_text.lower()
 
-    # Az entitás első karakterpozíciója a szövegben
-    char_pos = text_lower.find(entity_lower)
-    if char_pos == -1:
-        # Fallback: első `fallback` szó
-        log.debug(f"Entitás nem található a szövegben: '{entity_name}' — fallback használata.")
-        return " ".join(words[:fallback])
+    sorted_terms = sorted(entity_keywords, key=len, reverse=True)
+    escaped = [re.escape(t) for t in sorted_terms]
+    pattern = re.compile(r"\b(" + "|".join(escaped) + r")\b", re.IGNORECASE)
 
-    # Karakterpozícióból szópozíció kiszámítása
-    # (megszámoljuk a szóközöket a char_pos előtt)
-    prefix = full_text[:char_pos]
-    word_pos = len(prefix.split())
+    seen_word_positions: set[int] = set()
+    windows: list[str] = []
 
-    start = max(0, word_pos - window)
-    end = min(len(words), word_pos + window)
+    for match in pattern.finditer(full_text):
+        word_pos = len(full_text[: match.start()].split())
+        if word_pos in seen_word_positions:
+            continue
+        seen_word_positions.add(word_pos)
 
-    return " ".join(words[start:end])
+        start = max(0, word_pos - window)
+        end = min(len(words), word_pos + window)
+        context = " ".join(words[start:end])
+        if context.strip():
+            windows.append(context)
+
+    if not windows:
+        windows.append(" ".join(words[:fallback]))
+
+    return windows
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +206,16 @@ def save_mention_sentiment(db, mention_id: int, score: float):
 # ---------------------------------------------------------------------------
 ensure_sentiment_column()
 
+startup_db = SessionLocal()
+try:
+    ENTITY_KEYWORDS_CACHE = load_entity_keywords_cache(startup_db)
+finally:
+    startup_db.close()
+
+if not ENTITY_KEYWORDS_CACHE:
+    log.error("Az entitás kulcsszó cache üres — nincsenek entitások a DB-ben. Leállás.")
+    exit(1)
+
 log.info(f"Sentiment Analyzer fut — {POLL_INTERVAL_SECONDS}s ciklusidővel. (Aspect-Based mód)")
 
 while True:
@@ -167,15 +229,29 @@ while True:
                 log.info(f"{len(pending)} entitás-hivatkozás vár szentiment-elemzésre.")
                 for row in pending:
                     try:
-                        context = extract_context_window(
+                        entity_data = ENTITY_KEYWORDS_CACHE.get(row.entity_id)
+                        entity_keywords = entity_data["keywords"] if entity_data else set()
+
+                        windows = find_all_context_windows(
                             full_text=row.raw_article_text,
-                            entity_name=row.entity_name
+                            entity_keywords=entity_keywords,
                         )
-                        score = compute_sentiment_score(context)
-                        save_mention_sentiment(db, row.mention_id, score)
+
+                        scores = []
+                        for window_text in windows:
+                            masked = mask_other_entities(
+                                window_text, row.entity_id, ENTITY_KEYWORDS_CACHE
+                            )
+                            s = compute_sentiment_score(masked)
+                            scores.append(s)
+
+                        avg_score = round(sum(scores) / len(scores), 4) if scores else 0.0
+                        save_mention_sentiment(db, row.mention_id, avg_score)
+
                         log.info(
                             f"Szentiment kiszámolva: [{row.entity_name}] | "
-                            f"[{row.url}] -> Score: {score}"
+                            f"[{row.url}] -> {len(windows)} ablak, "
+                            f"score={avg_score}"
                         )
                     except Exception as e:
                         log.error(

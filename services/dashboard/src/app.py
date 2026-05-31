@@ -1,49 +1,25 @@
-import os
+import requests
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-from sqlalchemy import create_engine, text
 
-# ---------------------------------------------------------------------------
-# Oldal konfiguráció
-# ---------------------------------------------------------------------------
+API_URL = "http://web_api:8000/api/momentum/latest"
+
 st.set_page_config(
     page_title="Választás 2026 – Média Momentum Radar",
     page_icon="📡",
     layout="wide",
 )
 
-# ---------------------------------------------------------------------------
-# DB kapcsolat + adatlekérdezés
-# ---------------------------------------------------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-
-@st.cache_resource
-def get_engine():
-    return create_engine(DATABASE_URL)
-
-
-@st.cache_data(ttl=120)   # 2 percenként frissül
-def load_data() -> pd.DataFrame:
-    engine = get_engine()
-    with engine.connect() as conn:
-        df = pd.read_sql(text("""
-            SELECT
-                dm.date,
-                pe.name                 AS entity_name,
-                dm.total_articles,
-                dm.total_reach,
-                dm.average_sentiment,
-                dm.momentum_score,
-                dm.baseline_sentiment,
-                dm.adjusted_momentum
-            FROM daily_momentum dm
-            INNER JOIN political_entities pe ON pe.id = dm.entity_id
-            ORDER BY dm.date ASC, pe.name
-        """), conn)
-    df["date"] = pd.to_datetime(df["date"])
-    return df
+@st.cache_data(ttl=120)
+def load_data():
+    try:
+        resp = requests.get(API_URL, timeout=10)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -52,19 +28,25 @@ def load_data() -> pd.DataFrame:
 st.title("📡 Választás 2026 – Média Momentum Radar")
 st.caption(
     "Valós idejű médiafelügyelet · Frissítés: 2 percenként · "
-    "Forrás: 14 magyar hírportál RSS feedje"
+    "Forrás: 7 magyar hírportál RSS feedje"
 )
 
 with st.spinner("Adatok betöltése..."):
-    df = load_data()
+    data = load_data()
 
-if df.empty:
+if data is None:
     st.warning(
-        "⏳ Még nincs elegendő adat a megjelenítéshez. "
-        "A rendszernek szüksége van néhány percre, hogy cikkeket scrapeljen, "
-        "feldolgozzon és szentimentet számoljon. Kérlek, várj és frissítsd az oldalt!"
+        "Nem sikerült elérni az API-t (web_api:8000). "
+        "Ellenőrizd, hogy a web_api konténer fut-e, majd frissítsd az oldalt."
     )
     st.stop()
+
+if not data:
+    st.info("Jelenleg nincsenek elérhető adatok a vizualizációhoz.")
+    st.stop()
+
+df = pd.DataFrame(data)
+df["date"] = pd.to_datetime(df["date"])
 
 # ---------------------------------------------------------------------------
 # Szűrők a sidebarban
@@ -82,7 +64,6 @@ with st.sidebar:
         value=(df["date"].min().date(), df["date"].max().date()),
     )
 
-# Szűrés alkalmazása
 mask = df["entity_name"].isin(selected)
 if len(date_range) == 2:
     mask &= (df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])
@@ -108,7 +89,7 @@ if not latest.empty:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# 1. Adjusted Momentum vonaldiagram (a főmutató)
+# 1. Adjusted Momentum vonaldiagram
 # ---------------------------------------------------------------------------
 st.subheader("🎯 Adjusted Momentum – valós, bias-kiszűrt politikai médiahatás")
 st.caption(
@@ -227,5 +208,5 @@ with st.expander("🗃️ Nyers adatok megtekintése"):
 # ---------------------------------------------------------------------------
 st.caption(
     "🤖 Powered by NYTK/sentiment-ohb3-xlm-roberta-hungarian · "
-    "14 RSS forrás · Frissítés: 10 percenként"
+    "7 RSS forrás · Frissítés: 10 percenként"
 )

@@ -1,3 +1,4 @@
+import re
 import time
 import logging
 from sqlalchemy.exc import IntegrityError
@@ -8,23 +9,55 @@ from shared.models.db_models import Raw_Articles, Processed_Articles
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
-log.info("--- Processor Service Indul (DB-alapú dinamikus kulcsszavak) ---")
+log.info("--- Processor Service Indul (Regex Word-Boundary alapú kulcsszó-illesztés) ---")
 
 # ---------------------------------------------------------------------------
-# Kulcsszó-cache: DB-ből töltjük be egyszer induláskor
-# Struktúra: [ { "keyword": "orbán viktor", "entity_id": <uuid>, "entity_name": "Orbán Viktor" }, ... ]
+# Kulcsszó-cache struktúrája:
+# [
+#   {
+#     "entity_id": 1,
+#     "entity_name": "Fidesz-Kormány",
+#     "primary_keyword": "fidesz",
+#     "pattern": re.compile(r"\b(fidesz|fidesszel|fidesznek|...)\b", re.IGNORECASE)
+#   },
+#   ...
+# ]
 # ---------------------------------------------------------------------------
 KEYWORD_CACHE: list[dict] = []
+
+
+# ---------------------------------------------------------------------------
+# DB migráció: új oszlopok hozzáadása
+# ---------------------------------------------------------------------------
+def run_migrations(db):
+    """Eltávolítja a redundans primary_keyword oszlopot (ha még létezne), és hozzáadja az új oszlopokat."""
+    # A régi, felesleges oszlop eltávolítása
+    db.execute(text("""
+        ALTER TABLE keywords DROP COLUMN IF EXISTS primary_keyword
+    """))
+    # aliases JSONB oszlop — ez tartja a ragozott alakokat / szinonímákat
+    db.execute(text("""
+        ALTER TABLE keywords
+        ADD COLUMN IF NOT EXISTS aliases JSONB DEFAULT '[]'::jsonb
+    """))
+    # article_entity_mentions: matched_keyword
+    db.execute(text("""
+        ALTER TABLE article_entity_mentions
+        ADD COLUMN IF NOT EXISTS matched_keyword VARCHAR(255)
+    """))
+    db.commit()
+    log.info("✓ DB migráció kész (primary_keyword eldobva, aliases + matched_keyword oszlopok).")
 
 
 def ensure_mentions_table(db):
     """Létrehozza az article_entity_mentions kapcsolótáblát, ha még nem létezik."""
     db.execute(text("""
         CREATE TABLE IF NOT EXISTS article_entity_mentions (
-            id          SERIAL PRIMARY KEY,
-            article_id  UUID NOT NULL REFERENCES raw_articles(article_id) ON DELETE CASCADE,
-            entity_id   INTEGER NOT NULL REFERENCES political_entities(id) ON DELETE CASCADE,
-            found_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            id            SERIAL PRIMARY KEY,
+            article_id    UUID NOT NULL REFERENCES raw_articles(article_id) ON DELETE CASCADE,
+            entity_id     INTEGER NOT NULL REFERENCES political_entities(id) ON DELETE CASCADE,
+            matched_keyword VARCHAR(255),
+            found_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             UNIQUE (article_id, entity_id)
         )
     """))
@@ -32,40 +65,95 @@ def ensure_mentions_table(db):
     log.info("✓ article_entity_mentions tábla ellenőrizve/létrehozva.")
 
 
+# ---------------------------------------------------------------------------
+# Kulcsszavak betöltése DB-ből — Regex pattern-ek előfordítása
+# ---------------------------------------------------------------------------
 def load_keywords_from_db(db) -> list[dict]:
-    """Betölti a keywords táblát és a hozzá tartozó political_entities neveket."""
+    """
+    Betölti a keywords táblát és összeépíti az entitásonkénti Regex pattern-eket.
+    Minden entitáshoz egy compiled regex jön létre:
+      \b(primary_keyword|alias1|alias2|...)\b  (IGNORECASE)
+
+    A szóhatár (\b) kiszűri a fals pozitív substring találatokat
+    (pl. "fideszes" nem illik rá a "fidesz" pattern-re, ha nem adjuk hozzá aliasként).
+    """
     try:
         rows = db.execute(text("""
-            SELECT k.keyword, k.entity_id, pe.name AS entity_name
+            SELECT
+                k.entity_id,
+                pe.name     AS entity_name,
+                k.keyword
             FROM keywords k
             JOIN political_entities pe ON pe.id = k.entity_id
         """)).fetchall()
-
-        cache = [
-            {"keyword": row.keyword.lower(), "entity_id": row.entity_id, "entity_name": row.entity_name}
-            for row in rows
-        ]
-        log.info(f"✓ {len(cache)} kulcsszó betöltve {len({r['entity_id'] for r in cache})} entitáshoz.")
-        return cache
     except Exception as e:
-        log.error(f"Kritikus hiba a kulcsszavak betöltésekor: {e}")
+        log.error(f"Kulcsszavak betöltési hiba: {e}")
         return []
 
+    # entity_id → {entity_name, primary_keyword, terms[]} csoportosítás
+    entity_terms: dict[int, dict] = {}
+    for row in rows:
+        eid = row.entity_id
+        if eid not in entity_terms:
+            entity_terms[eid] = {
+                "entity_name": row.entity_name,
+                "primary_keyword": row.keyword,   # az első talált kulcsszó lesz a primary
+                "terms": set(),
+            }
+        # Az eredeti keyword mindig benne van
+        entity_terms[eid]["terms"].add(row.keyword.lower())
+        # Aliasok hozzáadása (JSONB lista) — a kulcsszó sorból
+        if hasattr(row, 'aliases') and row.aliases:
+            for alias in (row.aliases if isinstance(row.aliases, list) else []):
+                if alias:
+                    entity_terms[eid]["terms"].add(alias.lower())
+
+    cache = []
+    for eid, data in entity_terms.items():
+        # Hosszabb kifejezések előre (greedy matching elkerülésére)
+        sorted_terms = sorted(data["terms"], key=len, reverse=True)
+        # Regex speciális karakterek escapelése
+        escaped = [re.escape(t) for t in sorted_terms]
+        pattern_str = r"\b(" + "|".join(escaped) + r")\b"
+        try:
+            compiled = re.compile(pattern_str, re.IGNORECASE)
+        except re.error as e:
+            log.warning(f"Regex hiba ({data['entity_name']}): {e} — kihagyva.")
+            continue
+
+        cache.append({
+            "entity_id":      eid,
+            "entity_name":    data["entity_name"],
+            "primary_keyword": data["primary_keyword"],
+            "pattern":        compiled,
+        })
+
+    log.info(
+        f"✓ {len(cache)} entitás betöltve, "
+        f"{sum(len(e['terms']) for e in entity_terms.values())} kifejezéssel "
+        f"(Regex word-boundary mód)."
+    )
+    return cache
+
 
 # ---------------------------------------------------------------------------
-# Szűrőfüggvény — gyors string-matching (ThinkPad-barát, spaCy nélkül)
+# Szöveg-illesztés Regex alapon
 # ---------------------------------------------------------------------------
-def find_matching_entities(text_lower: str, keyword_cache: list[dict]) -> dict:
+def find_matching_entities(text_content: str, keyword_cache: list[dict]) -> dict:
     """
-    Visszaadja az egyedi entity_id → entity_name mapping-et azokhoz az
-    entitásokhoz, amelyek kulcsszava szerepel a szövegben.
+    Visszaadja az egyedi entity_id → {entity_name, matched_keyword} mapping-et.
+    A keresés \b szóhatáros Regex-szel történik (IGNORECASE).
     """
     found: dict = {}
     for item in keyword_cache:
-        if item["keyword"] in text_lower:
-            entity_id = item["entity_id"]
-            if entity_id not in found:
-                found[entity_id] = item["entity_name"]
+        match = item["pattern"].search(text_content)
+        if match:
+            eid = item["entity_id"]
+            if eid not in found:
+                found[eid] = {
+                    "entity_name":    item["entity_name"],
+                    "matched_keyword": match.group(0),   # a ténylegesen illeszkedett szó
+                }
     return found
 
 
@@ -73,7 +161,7 @@ def find_matching_entities(text_lower: str, keyword_cache: list[dict]) -> dict:
 # Fő feldolgozó pipeline
 # ---------------------------------------------------------------------------
 def process_article(db, article_id: str, keyword_cache: list[dict]):
-    """Betölti a cikket, kulcsszó-szűrést futtat, majd menti a találatokat."""
+    """Betölti a cikket, regex szűrést futtat, majd menti a találatokat."""
     article = db.query(Raw_Articles).filter(Raw_Articles.article_id == article_id).first()
     if not article:
         log.error(f"Cikk nem található: {article_id}")
@@ -86,15 +174,22 @@ def process_article(db, article_id: str, keyword_cache: list[dict]):
         db.commit()
         return
 
-    # --- Gyors előszűrés ---
-    text_lower = text_content.lower()
-    matched_entities = find_matching_entities(text_lower, keyword_cache)
+    matched_entities = find_matching_entities(text_content, keyword_cache)
 
     if not matched_entities:
         log.info(f"Skipped (nem releváns): {article.title[:70]}")
         article.status = 'skipped'
         db.commit()
         return
+
+    # Explícit találat log — portfolió neve + entitás + matched keyword + URL
+    portal_name = getattr(article.portal, 'name', 'ismeretlen') if hasattr(article, 'portal') and article.portal else 'ismeretlen'
+    for entity_id, match_data in matched_entities.items():
+        log.info(
+            f"[{portal_name}] Tállat: {match_data['entity_name']} "
+            f"-> matched_keyword: '{match_data['matched_keyword']}' "
+            f"(URL: {article.url})"
+        )
 
     # --- 1. Processed_Articles alap rekord mentése ---
     try:
@@ -103,7 +198,7 @@ def process_article(db, article_id: str, keyword_cache: list[dict]):
             word_count=len(text_content.split()),
         ))
         article.status = 'processed'
-        db.flush()  # ID generáláshoz, de még nem commit
+        db.flush()
     except IntegrityError:
         db.rollback()
         log.warning(f"Már feldolgozva (IntegrityError): {article_id}")
@@ -115,15 +210,23 @@ def process_article(db, article_id: str, keyword_cache: list[dict]):
 
     # --- 2. Entitás-hivatkozások mentése a kapcsolótáblába ---
     saved_entity_ids = []
-    for entity_id, entity_name in matched_entities.items():
+    for entity_id, match_data in matched_entities.items():
         try:
             db.execute(text("""
-                INSERT INTO article_entity_mentions (article_id, entity_id)
-                VALUES (:article_id, :entity_id)
-                ON CONFLICT (article_id, entity_id) DO NOTHING
-            """), {"article_id": str(article.article_id), "entity_id": entity_id})
+                INSERT INTO article_entity_mentions (article_id, entity_id, matched_keyword)
+                VALUES (:article_id, :entity_id, :matched_keyword)
+                ON CONFLICT (article_id, entity_id) DO UPDATE SET
+                    matched_keyword = EXCLUDED.matched_keyword
+            """), {
+                "article_id":      str(article.article_id),
+                "entity_id":       entity_id,
+                "matched_keyword": match_data["matched_keyword"],
+            })
             saved_entity_ids.append(entity_id)
-            log.info(f"  → '{entity_name}' (entity_id: {entity_id})")
+            log.info(
+                f"  → '{match_data['entity_name']}' "
+                f"(matched: '{match_data['matched_keyword']}')"
+            )
         except Exception as e:
             log.error(f"  ✗ Entitás mentési hiba (entity_id={entity_id}): {e}")
 
@@ -135,12 +238,13 @@ def process_article(db, article_id: str, keyword_cache: list[dict]):
 
 
 # ---------------------------------------------------------------------------
-# Startup: séma + kulcsszavak betöltése DB-ből
+# Startup: séma + migráció + kulcsszavak betöltése
 # ---------------------------------------------------------------------------
 startup_db = get_db_session("Processor-startup")
 if startup_db:
     try:
         ensure_mentions_table(startup_db)
+        run_migrations(startup_db)
         KEYWORD_CACHE = load_keywords_from_db(startup_db)
     finally:
         startup_db.close()
@@ -149,7 +253,7 @@ else:
     exit(1)
 
 if not KEYWORD_CACHE:
-    log.error("A kulcsszó-cache üres — a keywords tábla üres vagy nem elérhető. Leállás.")
+    log.error("A kulcsszó-cache üres — nincs primary_keyword az adatbázisban. Leállás.")
     exit(1)
 
 

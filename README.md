@@ -1,128 +1,286 @@
-# Projekt Dokumentáció: "Nagyágyú" Politikai Elemző Rendszer
-**Verzió:** 1.0
-**Dátum:** 2025. október 30.
-**Státusz:** Tervezés lezárva, implementációra kész
+# Projekt 2026 — Média Momentum Radar
 
-## 1. 📜 Projekt Áttekintés és Célkitűzések
+**Valós idejű, bias-kiszűrt politikai médiafigyelő és momentum-elemző rendszer.**
 
-### 1.1. Projekt Célja (Executive Summary)
-
-A "Nagyágyú" projekt célja egy olyan adatalapú, gépi tanulási rendszer felépítése, amely képes megbecsülni és előrejelezni a 2026-os magyarországi választások kimenetelét, kiemelt fókusszal **Orbán Viktor (OV)** és **Magyar Péter (MP)** politikai dinamikájára.
-
-A rendszer nem csupán a média-megjelenések volumenét méri, hanem egy hibrid modellt alkalmaz, amely a **valós közvéleménykutatási (KK) adatokat** (mint "baseline") kombinálja a **súlyozott média-momentummal** (mint "iránytű"), hogy valósághű és torzításoktól megtisztított predikciót adjon.
-
-### 1.2. A Probléma: Torzítás és Propaganda
-
-Egy egyszerű "cikk-számláló" vagy "sentiment elemző" modell azonnal megbukna a magyar médiakörnyezetben. A predikciós modellnek aktívan kezelnie kell a következő kritikus torzítási faktorokat:
-
-1.  **"Szőnyegbombázás" (Astroturfing):** A propaganda-hálózatok képesek ugyanazt a narratívát (pl. "tisza adó") több tucat portálon egyidejűleg leközölni, mesterségesen felnagyítva annak "hangerősségét".
-2.  **Hitelességi Aszimmetria:** Egy alacsony elérésű, magas torzítású portálról érkező hír nem bírhat azonos súllyal, mint egy magas hitelességű, független portálról érkező.
-3.  **Irónia és Szarkazmus:** A politikai nyelv tele van rejtett hangulattal, ami a hagyományos NLP modelleket megtéveszti.
-
-### 1.3. A Megoldás: A Hibrid Modell
-
-A rendszerünk egy kétpilléres hibrid modellen alapul:
-
-1.  **A "Szent Grál" (Baseline Modell):** Ez a modell a valós, publikus **közvéleménykutatási adatokat** (`Polls` tábla) használja. Ez adja a rendszer "valósághoz kötött" alapját, megmutatva a fix szavazói bázisok és a bizonytalanok arányát.
-2.  **Az "Iránytű" (Média Momentum Modell):** Ez a mi teljes adat-pipeline-unk, ami a `DailyAggregates` táblába dolgozik. Azt méri, hogy az elmúlt 24 óra **súlyozott és torzítás-kezelt** médiaeseményei merre és milyen mértékben mozdítják el a bizonytalan szavazókat.
-
-A végső predikció a **Baseline (KK adat) + Momentum (Média-analízis)** összege, amelyet a rendszer minden új KK adat publikálásakor **automatikusan újrakalibrál**.
+7 magyar hírportál RSS feedjét monitorozza, Aspect-Based Sentiment Analysis (ABSA) segítségével entitás-szintű hangulatelemzést végez, social media elérést gyűjt, majd egy portál-baseline szűrt **Adjusted Momentum** mutatóval méri a valós — propagandától tisztított — politikai médiahatást.
 
 ---
 
-## 2. 🏛️ Rendszer Architektúra
+## Technológiai Stack
 
-A rendszer egy **skálázható, robusztus és hibatűrő mikroszolgáltatási architektúrára** épül, amelynek komponensei egy központi `Job Queue`-n (üzenetsoron) keresztül kommunikálnak. Ez lehetővé teszi, hogy az egyes feladatok (scrapelés, feldolgozás) egymástól függetlenül fussanak és skálázódjanak.
-
-
-
-### 2.1. Fő Komponensek
-
-1.  **Backend Services (Workers):**
-    * **`Scheduler`:** Időzítő, ami a feladatokat (scrapelés, aggregálás) a `Job Queue`-ba helyezi.
-    * **`Scraper Service`:** Felelős az RSS feedek olvasásáért, a cikkek letöltéséért és a `RawArticles` táblába írásáért.
-    * **`Processing Service`:** A rendszer "agya". NLP modelleket futtat a nyers szövegen, elvégzi a sentiment analízist, irónia-detekciót, narratíva-klaszterezést, és beírja az eredményt a `ProcessedArticles` táblába.
-    * **`Aggregator Service`:** A rendszer "szíve". Naponta lefut, kiszámolja a `cbi_score`-t (Torzítási Index), súlyozza a napi cikkeket, aggregálja az adatokat a `DailyAggregates` táblába, és futtatja a Hibrid Predikciós Modellt (összevetve a `Polls` és a `DailyAggregates` adatokat).
-2.  **Data & Messaging Layer:**
-    * **`PostgreSQL DB`:** A rendszer fő adattárolója (lásd 3. fejezet).
-    * **`Job Queue (RabbitMQ / Redis)`:** Az üzenetsor, ami a mikroszolgáltatások közötti kommunikációt és feladatkiosztást kezeli.
-3.  **Presentation & API Layer:**
-    * **`Web/API Service`:** Kiszolgálja a dashboardot a felhasználó felé, és egy API-t biztosít a `DailyAggregates` tábla adatainak lekérdezéséhez.
-4.  **External Systems:**
-    * **`User`:** A dashboardot megtekintő felhasználó.
-    * **`Internet (RSS Feeds)`:** A nyers adatforrás.
-    * **`LLM API`:** A napi aggregált adatokból szöveges elemzést generáló külső szolgáltatás.
+| Réteg | Technológiák |
+|---|---|
+| Konténerizáció | Docker, Docker Compose |
+| Üzenetsor | Redis (task queue + process queue) |
+| Adatbázis | PostgreSQL 16, SQLAlchemy (ORM + raw SQL), psycopg2 |
+| Backend API | Python 3.11, FastAPI, Uvicorn |
+| Frontend | Streamlit, Plotly, Pandas |
+| NLP | HuggingFace — `NYTK/sentiment-ohb3-xlm-roberta-hungarian` |
+| Web Scraping | feedparser, trafilatura, BeautifulSoup4 |
+| Social Metrics | SharedCount API (Facebook), Reddit Search API |
 
 ---
 
-## 3. 🗄️ Adatbázis Séma (ERD)
+## Architektúra
 
-Az adatbázis 6 fő táblára épül, amelyek szétválasztják az OLTP (adatgyűjtés) és az OLAP (elemzés) feladatokat.
+```
+Scheduler ──► Redis ──► Scraper ──► Redis ──► Processor
+  (10p)      task_queue   (14 RSS)  process_queue  (regex keyword
+                                                      matching)
+                                                          │
+                                                          ▼
+                                               article_entity_mentions
+                                                          │
+                                     ┌────────────────────┼────────────────────┐
+                                     ▼                    ▼                    ▼
+                            Sentiment Analyzer    Metrics Updater        Aggregator
+                            (HuggingFace NLP)     (SharedCount+Reddit)   (14d baseline
+                                     │                    │               adjusted momentum)
+                                     │                    │                    │
+                                     ▼                    ▼                    ▼
+                            sentiment_score        article_metrics      daily_momentum
+                                                                              │
+                                                                              ▼
+                                                                        Web API
+                                                                        (FastAPI)
+                                                                              │
+                                                                              ▼
+                                                                        Dashboard
+                                                                        (Streamlit)
+```
 
+### Adatfolyam lépésről lépésre
 
-
-1.  **`Portals`:**
-    * **Cél:** Az adatforrások (hírportálok) listája.
-    * **Kulcs Mező:** `cbi_score` (Calculated Bias Index) – A `Aggregator Service` által hetente frissített, számított torzítási/hitelességi pontszám, ami a súlyozáshoz kell.
-2.  **`RawArticles`:**
-    * **Cél:** A beérkező, feldolgozatlan cikkek "visszavonhatatlan logja".
-    * **Kulcs Mező:** `raw_article_text` (a nyers, teljes szöveg).
-3.  **`ProcessedArticles`:**
-    * **Cél:** A "dúsított" adattábla, a `Processing Service` kimenete.
-    * **Kulcs Mezők:**
-        * `sentiment_ov`, `sentiment_mp`: A szereplőkre vonatkozó hangulat.
-        * **`sentiment_confidence_score`:** Az NLP modell magabiztossága (az irónia-szűréshez).
-        * **`narrative_hash`:** A cikk tartalmának "ujjlenyomata" (a "szőnyegbombázás" szűréséhez).
-4.  **`Polls`:**
-    * **Cél:** A "Szent Grál". A valós közvéleménykutatási adatok tárolója, a Baseline Modell alapja. Manuálisan vagy célzott scraperrel töltendő.
-5.  **`DailyAggregates`:**
-    * **Cél:** Az OLAP tábla, a dashboard motorja. Napi egy sor, ami mindent összefoglal.
-    * **Kulcs Mezők:** `share_of_voice_ov`, `avg_sentiment_ov` (már súlyozva a `cbi_score`-ral), `sentiment_std_dev_mp` (polarizáció mérése), `topic_distribution_json`.
-6.  **`DailyPortalAggregates`:**
-    * **Cél:** "Drill-down" tábla a dashboard "Nagyító" funkciójához. Napi bontás portálonként.
-
----
-
-## 4. 🧠 Adatfolyam és Torzításkezelési Logika
-
-Az adat útja a nyers hírtől a súlyozott predikcióig:
-
-1.  **Gyűjtés (Ingestion):** A `Scheduler` indítja a `Scraper`-t, ami a `Portals` táblából olvas, letölti a cikkeket, és beírja azokat a `RawArticles` táblába. Ezután üzenetet küld a `Queue`-ba ("Új cikk érkezett").
-2.  **Feldolgozás (Processing):** A `Processing Service` felveszi az üzenetet, kiolvassa a cikket a `RawArticles`-ból, és elvégzi az NLP elemzést:
-    * Kiszámolja a `sentiment_ov` és `sentiment_mp` értékeket.
-    * Kiszámolja a **`sentiment_confidence_score`**-t (ha alacsony, a modell iróniát sejt).
-    * Kiszámolja a **`narrative_hash`**-t (pl. SimHash segítségével), hogy azonosítsa a duplikált narratívákat.
-    * Az eredményt a `ProcessedArticles` táblába menti.
-3.  **Aggregálás és Súlyozás (Aggregation):** A `Scheduler` naponta egyszer indítja az `Aggregator`-t:
-    * **Torzítás Számítás:** Először frissíti a `Portals` tábla `cbi_score` mezőit az elmúlt X nap adatai alapján.
-    * **Súlyozott Aggregálás:** Végigolvassa az aznapi `ProcessedArticles` adatokat. A napi átlag sentiment (`avg_sentiment_ov`) számításakor minden cikk sentimentjét **súlyozza** a cikk portáljának `cbi_score`-ával.
-    * **Narratíva Számolás:** A `narrative_hash` alapján megszámolja az *egyedi narratívák* számát (nem az összes cikket).
-    * Az eredményt a `DailyAggregates` táblába menti.
-4.  **Predikció és Kalibrálás (Prediction):**
-    * Az `Aggregator` beolvassa a legfrissebb adatot a `Polls` táblából (ez a **Baseline**).
-    * Beolvassa a frissen számolt `DailyAggregates` adatot (ez a **Momentum**).
-    * A kettő kombinációjából kiszámítja a napi predikciót, amit szintén a `DailyAggregates`-be (vagy egy külön predikciós táblába) ment.
+1. **Scheduler** — 10 percenként `scrape_task` üzenetet küld a Redis `task_queue`-ba
+2. **Scraper** — 7 portál RSS feedjét dolgozza fel, trafilatura-val kinyeri a cikkek szövegét, menti a `raw_articles` táblába, majd minden új cikk ID-ját beteszi a Redis `process_queue`-ba
+3. **Processor** — Regex word-boundary kulcsszó-illesztéssel detektálja a politikai entitásokat, rögzíti az `article_entity_mentions` kapcsolótáblában
+4. **Sentiment Analyzer** — Entitásonként, az összes előfordulás körüli ±50 szavas maszkolt kontextusablakokon HuggingFace NLP sentiment elemzést futtat, az eredmények átlagát menti
+5. **Metrics Updater** — SharedCount API-n (Facebook) és Reddit-en keresztül social media interakciós metrikákat gyűjt, decay polling stratégiával
+6. **Aggregator** — 14 napos portál-szintű baseline sentimenthez képesti eltérés alapján Adjusted Momentum-ot számol, menti a `daily_momentum` táblába
+7. **Web API** — FastAPI REST végponton keresztül szolgálja ki a `daily_momentum` adatokat
+8. **Dashboard** — Streamlit felület Plotly vizualizációkkal, 2 percenként frissül a Web API-n keresztül
 
 ---
 
-## 5. 🖥️ Vizuualizációs Terv (Dashboard Kijelzők)
+## Quick Start
 
-A `Web/API Service` a `DailyAggregates` és `DailyPortalAggregates` táblákból építi fel a dashboardot, amely a következő kulcsfontosságú kijelzőket tartalmazza:
+```bash
+git clone <repo-url> projekt2026
+cd projekt2026
+docker compose up -d
+```
 
-1.  **A "Kötélhúzás-mérő" (Fő Predikció):** A Hibrid Modell aktuális állását mutató fő kijelző (pl. OV: 48% vs. MP: 52%).
-2.  **Az LLM "Napi Elemző":** Az `Aggregator` által az LLM API-nak küldött adatok alapján generált, 150 szavas semleges szöveges összefoglaló a nap trendjeiről.
-3.  **Sentiment Vonaldiagram ("Pulzusmérő"):** A két szereplő súlyozott átlag-sentimentjének alakulása az időben.
-4.  **Interaktív Téma-Sentiment Hőtérkép:** Megmutatja, hogy az egyes témákban (pl. 'gazdaság') mekkora volt a hangerő és milyen volt a sentiment (pl. 'gazdaság' = nagy piros téglalap MP-nél).
-5.  **Média-Terjeszkedés Térkép:** A `DailyPortalAggregates` alapján megmutatja, mely portál-típusokon (buborékokon) tudott "áttörni" egy adott narratíva.
+A szolgáltatások:
+
+| Szolgáltatás | Port | Leírás |
+|---|---|---|
+| Dashboard | 8501 | Streamlit vizualizációs felület |
+| Web API | 8000 | FastAPI REST API (`/api/momentum/latest`) |
+| pgAdmin | 5050 | PostgreSQL admin felület |
+
+A rendszer indulás után azonnal elkezdi a cikkek gyűjtését. Az első értelmes adatok ~5-10 perc múlva jelennek meg (a sentiment és metrics pipeline-nak idő kell).
 
 ---
 
-## 6. 📋 Implementációs Fázisok (Epics)
+## Technikai Különlegességek
 
-A projekt végrehajtása a "Project Board"-on definiált 5 fő fázisban (Epic) történik:
+### Idempotens Adatbázis Inicializálás
 
-1.  **Epic 1: Foundation (Alapozás):** Az adatbázis séma létrehozása, a `Job Queue` beállítása és a mikroszolgáltatások vázának (skeleton) felállítása.
-2.  **Epic 2: Data Ingestion (Adatgyűjtés):** A `Scheduler` és a `Scraper Service` teljes funkcionalitásának megépítése.
-3.  **Epic 3: Processing (Feldolgozás):** Az NLP pipeline, a sentiment analízis, az irónia-szűrő és a narratíva-klaszterező implementálása.
-4.  **Epic 4: The "Nagyágyú" (Aggregálás):** A `cbi_score` súlyozás, a Hibrid (KK+Média) Modell logikájának és az LLM kapcsolatnak a megírása.
-5.  **Epic 5: Showcase (Dashboard):** A `Web/API Service` és a vizualizációs réteg (Dashboard kijelzők) felépítése.
+Az `infra/db/` könyvtárban lévő SQL fájlokat a PostgreSQL konténer ABC sorrendben futtatja:
+
+- `01_init.sql` — Séma létrehozása (6 fő tábla + 7 alapértelmezett portál seed)
+- `02_seed.sql` — Entitások és kulcsszavak feltöltése (`political_entities`, `keywords`)
+
+Minden `CREATE TABLE` `IF NOT EXISTS`-szel, minden `INSERT` `ON CONFLICT DO NOTHING`-gal történik. A konténer újraindítása vagy a volume törlése után a rendszer determinisztikusan, beavatkozás nélkül újraépíti magát.
+
+### Cross-Entity Masking
+
+A Sentiment Analyzer a kontextusablakok NLP modellbe küldése előtt kimaszkolja a **más entitásokhoz** tartozó kulcsszavakat egy neutrális `[MÁSIK_SZEREPLŐ]` tokenre.
+
+Ha egy cikkben Orbán Viktor és Magyar Péter is szerepel, az Orbán Viktorra vonatkozó sentiment számításakor a "Magyar Péter", "MP", "Tisza Párt" kifejezések lecserélődnek — így a modell nem "szennyezett" szöveget kap, és a sentiment score valóban az adott entitásra vonatkozik.
+
+Az összes előfordulás körüli ±50 szavas ablakok átlaga adja a végső score-t, nem csak az első említés.
+
+### Adjusted Momentum (Bias-szűrt Médiahatás)
+
+A hagyományos sentiment elemzés nem veszi figyelembe a portálok politikai beállítottságát. Egy kormányközeli portál alapesetben is pozitívabban ír OV-ról — ez nem hír, hanem baseline.
+
+**Az Adjusted Momentum képlete:**
+
+```
+SUM(reach × (sentiment − portál_14_napos_baseline))
+```
+
+A rendszer minden portál-entitás párra kiszámolja a 14 napos átlagos sentimentet (baseline), majd a napi cikkek súlyozásánál ezt az eltérést használja. Így csak az számít, ami **eltér a megszokottól** — a valódi médiahatás.
+
+### Frontend-Backend Szétválasztás
+
+A Dashboard **nem csatlakozik közvetlenül az adatbázishoz**. Minden adat a Web API `/api/momentum/latest` REST végpontján keresztül érkezik, CORS engedélyezéssel. Ez lehetővé teszi:
+
+- A dashboard és az API független skálázását
+- Külső kliensek (mobil app, más dashboardok) csatlakozását
+- Az adatbázis séma változásainak izolálását a frontendtől
+
+---
+
+## Módszertan — Data Science Részletek
+
+### 1. Entitás-detekció: Regex Word-Boundary Matching
+
+A Processor a `keywords` táblából betöltött kulcsszavakból entitásonként egyetlen kompakt reguláris kifejezést fordít előre. A kifejezések hossz szerint csökkenő sorrendben (greedy matching elkerülésére) kerülnek a mintába:
+
+```
+pattern_e = \b(k₁|k₂|...|kₙ)\b        (IGNORECASE)
+```
+
+Minden `kᵢ` egy entitáshoz tartozó kulcsszó vagy alias (a `keywords.aliases` JSONB oszlopból). A `\b` szóhatár-biztosítás megakadályozza a fals pozitív substring találatokat (pl. `"fidesz"` nem illik `"fideszes"`-re, hacsak az nincs expliciten aliasként felvéve).
+
+Az illesztés eredménye az `article_entity_mentions` kapcsolótáblába kerül: `(article_id, entity_id, matched_keyword)`.
+
+### 2. Aspect-Based Sentiment Analysis (ABSA)
+
+**Modell:** `NYTK/sentiment-ohb3-xlm-roberta-hungarian` — XLM-RoBERTa alapú, magyar nyelvre finomhangolt háromosztályos (negatív / semleges / pozitív) sentiment klasszifikátor.
+
+**Kontextusablak kinyerés:** Egy cikken belül az adott entitás **összes** előfordulásához (`re.finditer`) tartozó ±50 szavas környezet kerül kivágásra:
+
+```
+W_{e,a}^{(i)} = a[ wordPos(matchᵢ) − 50  ..  wordPos(matchᵢ) + 50 ]
+```
+
+**Cross-Entity Masking:** Mielőtt a modell megkapná a szövegrészletet, a **más entitásokhoz** tartozó összes kulcsszó lecserélődik egy neutrális tokenre:
+
+```
+W̃_{e,a}^{(i)} = mask( W_{e,a}^{(i)}, K_{all \ e} )
+```
+
+ahol `K_{all \ e}` az összes entitás kulcsszavainak uniója, kivéve az éppen vizsgált `e` entitást. A maszkolás egyetlen regex `sub` művelettel történik:
+
+```
+pattern_mask = \b(other_k₁|other_k₂|...|other_kₙ)\b  →  [MÁSIK_SZEREPLŐ]
+```
+
+**Szentiment számítás:** A modell minden címkére valószínűséget ad (`top_k=None`). A score a pozitív és negatív osztály valószínűségének különbsége:
+
+```
+s = P(LABEL_2) − P(LABEL_0)        ∈ [−1.0, +1.0]
+```
+
+ahol `LABEL_0 = negatív`, `LABEL_1 = semleges`, `LABEL_2 = pozitív`. A semleges osztály nem befolyásolja a score-t.
+
+**Átlagolás:** Ha az entitás `N`-szer fordul elő a cikkben, a végső score a maszkolt ablakokon számolt score-ok számtani átlaga:
+
+```
+S_{e,a} = (1/N) · Σ_{i=1}^{N} s( W̃_{e,a}^{(i)} )
+```
+
+### 3. Social Media Reach
+
+A Metrics Updater két forrásból gyűjt elérési metrikákat:
+
+```
+reach(a) = FB_interactions(a) + Reddit_upvotes(a) + Reddit_comments(a)
+```
+
+- **Facebook:** SharedCount API v1.0 — `total_count` vagy `share + comment + reaction`
+- **Reddit:** Reddit Search JSON API — a legjobb találat `score` és `num_comments` értéke
+
+A metrikák gyűjtése **decay polling** stratégiával történik — a frissebb cikkeket gyakrabban ellenőrzi a rendszer:
+
+| Cikk kora | Frissítési gyakoriság |
+|---|---|
+| < 2 óra | 15 perc |
+| 2–12 óra | 1 óra |
+| 12–48 óra | 6 óra |
+
+Ez azért fontos, mert a social media interakciók döntő része a publikálás utáni első órákban érkezik (virális növekedési szakasz).
+
+### 4. Portal Baseline és Adjusted Momentum
+
+A rendszer központi mutatója az **Adjusted Momentum**, amely kiszűri a portálok politikai beállítottságából adódó alapszintű torzítást.
+
+**Portál Baseline (14 napos mozgó átlag):**
+
+```
+B_{p,e} = (1 / |A_{p,e,14}|) · Σ_{a ∈ A_{p,e,14}} S_{e,a}
+```
+
+ahol `A_{p,e,14}` azon cikkek halmaza, amelyek a `p` portálról származnak, tartalmazzák `e` entitást, és az elmúlt 14 napban lettek scrapelve.
+
+**Nyers Momentum (bias nélkül):**
+
+```
+M_{e,d} = Σ_{a ∈ A_{e,d}} ( R(a) · S_{e,a} )
+```
+
+ahol `A_{e,d}` a `d` napon scrapelt, `e` entitást tartalmazó cikkek halmaza.
+
+**Adjusted Momentum (bias-szűrt):**
+
+```
+M̃_{e,d} = Σ_{a ∈ A_{e,d}} ( R(a) · ( S_{e,a} − B_{portal(a),e} ) )
+```
+
+**Intuíció:** Ha egy kormányközeli portál átlagosan `+0.3` sentimenttel ír OV-ról (ez a baseline), akkor egy `+0.4`-es sentiment már csak `+0.1` adjusted értéket képvisel — hiszen a `+0.3` a "szokásos", nem valódi médiahatás. Fordítva: ha ugyanez a portál `−0.1` sentimentet produkál, az adjusted érték `−0.4`, ami jelentős negatív elmozdulást jelez a megszokotthoz képest.
+
+Az aggregátor 10 percenként újraszámolja az elmúlt 3 nap adatait (`LOOKBACK_DAYS = 3`), az eredményt upsert-eli a `daily_momentum` táblába.
+
+---
+
+## Fő Funkciók
+
+### Adjusted Momentum Vonal diagram
+
+A bias-kiszűrt politikai médiahatás alakulása entitásonként. A 0 vonal feletti érték pozitív, az alatti negatív irányba mutató médiahatást jelez a baseline-hoz képest.
+
+![Adjusted Momentum Vonal diagram](images/1.png)
+
+### Napi Átlag-Szentiment
+
+Az entitásonkénti nyers átlagos sentiment alakulása (−1.0 és +1.0 között). Ez a portálok beállítottságát NEM szűri — a "nyers pulzus".
+
+![Napi Átlag-Szentiment](images/2.png)
+
+### Napi Médiaelérés (Total Reach)
+
+Facebook + Reddit interakciók összesített száma entitásonként, naponta. Azt mutatja, mekkora közösségi média figyelem irányul az adott entitásra.
+
+![Napi Médiaelérés (Total Reach)](images/3.png)
+
+### Interaktív Szűrők
+
+Entitás-szintű szűrés (multiselect) és dátumintervallum szűkítés a sidebar-on keresztül.
+
+## Rendszerkövetelmények
+
+- Docker 24+ és Docker Compose v2
+- SharedCount API kulcs (opcionális, `.env`-ben: `SHAREDCOUNT_API_KEY`)
+- ~4 GB szabad memória (a HuggingFace modell miatt)
+- ~10 GB szabad lemezterület
+
+---
+
+## Projekt Struktúra
+
+```
+.
+├── docker-compose.yaml
+├── infra/db/
+│   ├── 01_init.sql          # Séma + portál seed
+│   └── 02_seed.sql          # Entitások + kulcsszavak
+├── services/
+│   ├── scheduler/            # Cron trigger (Redis task_queue)
+│   ├── scraper/              # RSS feed → raw_articles
+│   ├── processor/            # Regex keyword matching → article_entity_mentions
+│   ├── sentiment_analyzer/   # HuggingFace NLP → sentiment_score
+│   ├── metrics_updater/      # Social media metrikák → article_metrics
+│   ├── aggregator/           # Adjusted Momentum → daily_momentum
+│   ├── web_api/              # FastAPI REST API
+│   └── dashboard/            # Streamlit vizualizáció
+├── shared/
+│   ├── config.py             # DB/Redis konfiguráció
+│   ├── connections.py        # Retry-logikás kapcsolatkezelés
+│   └── models/db_models.py   # SQLAlchemy ORM modellek
+├── scripts/
+│   ├── reset_scores.py       # Sentiment score-ok nullázása
+│   └── verify_sentiment.py   # Sentiment ellenőrző lekérdezés
+```

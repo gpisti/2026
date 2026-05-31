@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infra/db:/docker-entrypoint-initdb.d/
       - pgdata:/var/lib/postgresql/data
 
   queue:
@@ -104,17 +104,6 @@ services:
       - db
     restart: always
 
-  jupyter_research:
-    container_name: 2026_jupyter_research
-    build:
-      context: ./research
-    ports:
-      - "8888:8888"
-    volumes:
-      - ./research:/app
-    environment:
-      - JUPYTER_TOKEN=mentor2026
-
   metrics_updater:
     container_name: 2026_metrics_updater
     build:
@@ -137,7 +126,7 @@ services:
     image: dpage/pgadmin4
     restart: always
     environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@mentor.local
+      - PGADMIN_DEFAULT_EMAIL=admin@mentor.com
       - PGADMIN_DEFAULT_PASSWORD=admin
     ports:
       - "5050:80"
@@ -157,7 +146,6 @@ services:
       - huggingface_cache:/root/.cache/huggingface
     depends_on:
       - db
-      - metrics_updater
     restart: always
 
   dashboard:
@@ -166,12 +154,10 @@ services:
       context: ./services/dashboard
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://admin:admin@db:5432/2026_db
     ports:
       - "8501:8501"
     depends_on:
-      - db
-      - aggregator
+      - web_api
     restart: always
 
 volumes:
